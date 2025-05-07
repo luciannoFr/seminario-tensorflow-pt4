@@ -4,66 +4,117 @@
   <meta charset="UTF-8" />
   <title>TensorFlow.js ejemplo</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0"></script>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tailwindcss@3.0.24/dist/tailwind.min.js"></script>
 </head>
-  <body style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; row-gap: 10px; margin: 0;">
-  <h1>TensorFlow.js ejemplo</h1>
-  <p>Formula: y = 2x + 6</p>
+<body class="flex flex-col justify-center items-center h-screen bg-gray-100">
 
-  <button onclick="entrenarModelo()">Entrenar Modelo</button>
-  <input type="number" id="inputX" value="4" />
-  <button onclick="predecir()">Predecir</button>
+  <h1 class="text-3xl font-semibold mb-4">TensorFlow.js ejemplo</h1>
+  <p class="mb-4">Formula: y = 2x + 6</p>
 
-  <p id="resultado"></p>
+  <button class="px-4 py-2 bg-blue-500 text-white rounded mb-2" onclick="entrenarModelo()">Entrenar Modelo</button>
+
+  <label for="inputX" class="mb-2">Ingresa los valores de X separados por coma</label>
+  <input type="text" id="inputX" value="4, 5, 6" class="px-4 py-2 border rounded mb-4" />
+  
+  <button class="px-4 py-2 bg-green-500 text-white rounded" onclick="predecir()">Predecir</button>
+
+  <p id="resultado" class="mt-4 text-lg"></p>
+  <div id="graficoPerdida" class="w-full mt-4" style="height: 400px;"></div>
+  <p id="perdidaResumen" class="mt-4 text-lg font-semibold"></p>
 
   <script>
-    // variable del modelo
-    let modelo;
-  
+    let modelo
+    // variable donde se guardan todas las perdidas de todos los entrenamientos
+    let perdidasAnteriores = []
+    // contador que indica cuantas veces se entreno el modelo
+    let cantidadEntrenamientos = 0
+
     // funcion que entrena el modelo usando tensorflow
     async function entrenarModelo() {
-      // mostramos que se esta entrenando
-      document.getElementById('resultado').innerText = "Entrenando modelo";
-  
-      // creamos un modelo secuencial que es el tipo mas comun
-      modelo = tf.sequential();
-  
-      // le agregamos una sola capa con una neurona porque solo vamos a predecir un valor
-      modelo.add(tf.layers.dense({ units: 1, inputShape: [1] }));
-  
-      // el modelo se compila y le deicmos que metodo usar para minimizar errores
-      // y que optimizador usar para ajustar los pesos durante el entrenamiento
-      modelo.compile({ loss: 'meanSquaredError', optimizer: 'sgd' });
-  
-      // datos de prueba q va de x del -6 al 2
-      const xTrain = tf.tensor1d([-6, -5, -4, -3, -2, -1, 0, 1, 2]);
-  
-      // datos de salida segun la funcion esa
-      const yTrain = tf.tensor1d([-6, -4, -2, 0, 2, 4, 6, 8, 10]);
-  
-      // entrenamos el modelo con esos datos durante 350 epocas que es como repetir muchas veces el aprendizaje
-      await modelo.fit(xTrain, yTrain, { epochs: 350 });
-  
-      // avisamos que ya termino y esta listo para usar
-      document.getElementById('resultado').innerText = "Modelo entrenado y listo para usar";
+      document.getElementById('resultado').innerText = "Entrenando modelo..."
+
+      // creamos un nuevo modelo cada vez que se entrena
+      modelo = tf.sequential()
+      modelo.add(tf.layers.dense({ units: 1, inputShape: [1] }))
+      modelo.compile({ loss: 'meanSquaredError', optimizer: 'sgd' })
+
+      // datos de entrenamiento
+      const xTrain = tf.tensor1d([-6, -5, -4, -3, -2, -1, 0, 1, 2])
+      const yTrain = tf.tensor1d([-6, -4, -2, 0, 2, 4, 6, 8, 10])
+
+      // historial local de este entrenamiento
+      let historialActual = []
+      let perdidaInicial = null
+      let perdidaFinal = null
+
+      // entrenamiento del modelo
+      await modelo.fit(xTrain, yTrain, {
+        epochs: 350,
+        callbacks: {
+          onEpochEnd: (epoch, logs) => {
+            historialActual.push({ epoch, loss: logs.loss })
+            if (epoch === 0) perdidaInicial = logs.loss
+            if (epoch === 349) perdidaFinal = logs.loss
+          }
+        }
+      })
+
+      // sumamos uno al contador
+      cantidadEntrenamientos++
+
+      // filtramos para reducir la cantidad de puntos en el grafico
+      const datosFiltrados = historialActual.filter((_, index) => index % 10 === 0)
+
+      // agregamos los datos de este entrenamiento al array global
+      perdidasAnteriores.push({
+        x: datosFiltrados.map(p => p.epoch),
+        y: datosFiltrados.map(p => p.loss),
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: 'entreno ' + cantidadEntrenamientos
+      })
+
+      // mostramos el grafico con todas las curvas acumuladas
+      mostrarGraficoPerdida()
+
+      // mostramos resultados de reduccion de perdida
+      const reduccion = ((perdidaInicial - perdidaFinal) / perdidaInicial) * 100
+      document.getElementById('resultado').innerText = "Modelo entrenado y listo para usar"
+      document.getElementById('perdidaResumen').innerText = 
+        `perdida inicial ${perdidaInicial.toFixed(4)} perdida final ${perdidaFinal.toFixed(4)} reduccion ${reduccion.toFixed(2)} por ciento`
     }
-  
-    // funcion que se ejecuta cuando el usuario quiere predecir un valor
+
+    // funcion para predecir valores usando el modelo entrenado
     async function predecir() {
-      // si todavia no se entreno mostramos un mensaje y no hacemos nada
       if (!modelo) {
-        document.getElementById('resultado').innerText = "Primero entrena el modelo";
-        return;
+        document.getElementById('resultado').innerText = "Primero entrena el modelo"
+        return
       }
-      
-      const x = parseFloat(document.getElementById('inputX').value);//lo convertimos en float por las duda
-  
-      // lo convertimos en un tensor 2d porque el modelo espera ese formato
-      const resultado = modelo.predict(tf.tensor2d([x], [1, 1]));
-  
-      // sacamos el resultado numerico del tensor
-      const y = await resultado.data();
-  
-      document.getElementById('resultado').innerText = `El resultado de predecir para ${x} es: ${y[0]}`;
+
+      const inputX = document.getElementById('inputX').value
+      const valoresX = inputX.split(',').map(val => parseFloat(val.trim()))
+      const tensorX = tf.tensor2d(valoresX, [valoresX.length, 1])
+      const resultado = modelo.predict(tensorX)
+      const y = await resultado.data()
+
+      let textoResultado = "resultados de prediccion"
+      for (let i = 0; i < valoresX.length; i++) {
+        textoResultado += `\npara x igual a ${valoresX[i]} y igual a ${y[i].toFixed(4)}`
+      }
+
+      document.getElementById('resultado').innerText = textoResultado
+    }
+
+    // funcion que muestra todas las curvas de perdida acumuladas
+    function mostrarGraficoPerdida() {
+      const layout = {
+        title: 'grafica de perdida durante el entrenamiento',
+        xaxis: { title: 'epoca', dtick: 10 },
+        yaxis: { title: 'valor de la perdida' }
+      }
+
+      Plotly.newPlot('graficoPerdida', perdidasAnteriores, layout)
     }
   </script>
   
